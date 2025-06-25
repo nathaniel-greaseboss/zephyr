@@ -38,7 +38,9 @@ static int board_gpio_init(void)
 	LL_GPIO_SetPinOutputType(GPIOJ, LL_GPIO_PIN_15, LL_GPIO_OUTPUT_PUSHPULL);
 	LL_GPIO_SetPinPull(GPIOJ, LL_GPIO_PIN_15, LL_GPIO_PULL_NO);
 	LL_GPIO_ResetOutputPin(GPIOJ, LL_GPIO_PIN_15);
-	k_busy_wait(200); /* Reset pulse */
+	for (int i = 0; i < 200; i++) {
+		__NOP();
+	}
 	LL_GPIO_SetOutputPin(GPIOJ, LL_GPIO_PIN_15);
 #endif
 
