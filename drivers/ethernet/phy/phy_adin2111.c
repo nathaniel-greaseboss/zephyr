@@ -72,6 +72,8 @@ LOG_MODULE_REGISTER(DT_DRV_COMPAT, CONFIG_PHY_LOG_LEVEL);
 
 /* Software Power-down Control Register */
 #define ADIN2111_PHY_CRSM_SFT_PD_CNTRL				0x8812U
+/* PHY Subsystem Reset bit */
+#define ADIN2111_CRSM_PHY_SUBSYS_RST				BIT(0)
 /* System Status Register */
 #define ADIN2111_PHY_CRSM_STAT					0x8818U
 /* Software Power-down Status */
@@ -286,6 +288,52 @@ int phy_adin2111_handle_phy_irq(const struct device *dev,
 	return ret;
 }
 
+/**
+ * @brief Force CRSM to re-sequence PHY2 and release it from reset.
+ *
+ * The ADIN2111 contains an internal Clock & Reset State Machine (CRSM)
+ * which controls power, clocks, and reset sequencing for both PHYs.
+ *
+ * On boards where the ADIN2111 RESET pin is not controlled by the host
+ * MCU (e.g. ADIN2111D1Z eval board), a MCU-only reboot does NOT reset
+ * the ADIN2111. In this case, PHY2 can remain held in CRSM reset and
+ * MDIO reads from PHY2 will return 0x0000 indefinitely.
+ *
+ * PHY2 cannot be released by writing to normal PHY control registers
+ * (e.g. vendor PHY reset registers), because those registers are not
+ * accessible until CRSM has enabled the PHY clock domain.
+ *
+ * Writing to the ADIN2111_PHY_CRSM_IRQ_MASK register is required to
+ * command the CRSM to re-enter its reset sequence. Despite its name,
+ * this register controls CRSM reset and clock sequencing in addition
+ * to IRQ masking.
+ *
+ * This function asserts the PHY subsystem reset request, delays to
+ * allow CRSM to propagate the reset, then deasserts the reset by
+ * writing a non-zero value to allow CRSM to advance and release PHY2.
+ *
+ * This must be done before polling PHY2 for availability.
+ */
+
+static int phy_adin2111_phy2_crsm_reset(const struct device *dev)
+{
+	/* Put PHY2 into CRSM software reset */
+	phy_adin2111_c45_write(dev,
+		MDIO_MMD_VENDOR_SPECIFIC1,
+		ADIN2111_PHY_CRSM_IRQ_MASK,
+		ADIN2111_CRSM_PHY_SUBSYS_RST);
+
+	k_sleep(K_USEC(10));
+
+	/* Deassert reset: any non-zero value advances CRSM */
+	phy_adin2111_c45_write(dev,
+		MDIO_MMD_VENDOR_SPECIFIC1,
+	ADIN2111_PHY_CRSM_IRQ_MASK,
+	1);
+
+    return 0;
+}
+
 static int phy_adin2111_sft_pd(const struct device *dev, bool enter)
 {
 	int ret;
@@ -458,6 +506,15 @@ static int phy_adin2111_init(const struct device *dev)
 	if (cfg->mii) {
 		ret = phy_adin2111_reset(dev);
 		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	/* Explicitly reset port 2 - if it is used */
+	if (cfg->phy_addr == 2) {
+		ret = phy_adin2111_phy2_crsm_reset(dev);
+		if (ret < 0) {
+			LOG_ERR("PHY %u CRSM reset failed: %d", cfg->phy_addr, ret);
 			return ret;
 		}
 	}
