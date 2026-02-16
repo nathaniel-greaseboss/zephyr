@@ -1083,6 +1083,8 @@ static int eth_adin2111_find_filter(const struct device *dev, uint8_t *mac, cons
 static int eth_adin2111_set_mac_filter(const struct device *dev, uint8_t *mac,
 				       const uint16_t port_idx)
 {
+	const struct adin2111_config *cfg = dev->config;
+	const bool is_adin2111 = (cfg->id == ADIN2111_MAC);
 	int i, ret, offset;
 	uint32_t reg;
 
@@ -1105,6 +1107,18 @@ static int eth_adin2111_set_mac_filter(const struct device *dev, uint8_t *mac,
 			uint32_t rules = (port_idx == 0 ? ADIN2111_ADDR_APPLY2PORT1
 					: ADIN2111_ADDR_APPLY2PORT2)
 					| ADIN2111_ADDR_TO_HOST;
+
+			/* For multicast/broadcast addresses, also forward to other port
+			 * to support daisy-chained configurations
+			 */
+			if (mac[0] & 0x01) {
+				rules |= ADIN2111_ADDR_TO_OTHER_PORT;
+				/* For ADIN2111, apply filter to both ports */
+				if (is_adin2111) {
+					rules |= ADIN2111_ADDR_APPLY2PORT1 |
+						 ADIN2111_ADDR_APPLY2PORT2;
+				}
+			}
 
 			return adin2111_write_filter_address(dev, mac, NULL, rules, i);
 		}
